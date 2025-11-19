@@ -3,28 +3,27 @@
 This README summarizes three potential approaches for building our CS3600 tournament agent. All descriptions are intentionally concise and engineering-focused. Placeholder video/resource links are included where relevant.
 
 ---
+## 1. AlphaZero-Style Agent (Neural Network + MCTS)
 
-## 1. MuZero-Style Agent (Neural + MCTS)
-
-MuZero combines three neural networks (representation, dynamics, prediction) with Monte Carlo Tree Search to learn strategy directly from self-play. The system learns its own evaluation function and long-term planning behavior.
+AlphaZero uses a single neural network with two heads—a **policy head** and a **value head**—combined with Monte Carlo Tree Search. The game’s actual forward model (via `forecast_move()`) is used for all state transitions, so no learned dynamics model is required. The network improves through self-play, learning to evaluate states and choose strong actions without any handwritten heuristics.
 
 **Pros**
-- Learns strategy automatically  
-- No manual heuristics required  
-- Excellent long-horizon planning  
-- Strong portfolio / RL experience
+- Much simpler than MuZero  
+- No learned dynamics → faster, more stable training  
+- Strong play through neural-guided MCTS  
+- Fits realistically into a 1-week development timeline  
 
 **Cons**
-- Most complex to implement  
-- Requires GPU training + debugging  
-- Higher development risk  
+- Requires GPU time for self-play + training  
+- Still more complex than pure MCTS  
+- Network design and training loop must be implemented correctly  
 
 **Best Use Case**  
-When we want a deep learning project that demonstrates advanced RL methods.
+When we want a powerful learning-based agent without the complexity and risk of full MuZero.
 
 **Suggested Videos/Resources**  
-- [MuZero Explanation](https://medium.com/@_michelangelo_/muzero-for-dummies-28fa076e781e)  
-- [AlphaZero Concepts](https://www.youtube.com/watch?v=gsbkPpoxGQk&t=7s)
+- [AlphaZero Explained](https://www.youtube.com/watch?v=JxYX7NWWEAM)  
+- [AlphaZero Paper Walkthrough](https://www.youtube.com/watch?v=ANDAk9yxZ1s)
 
 ---
 
