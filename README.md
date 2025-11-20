@@ -22,7 +22,7 @@ AlphaZero uses a single neural network with two heads—a **policy head** and a 
 When we want a powerful learning-based agent without the complexity and risk of full MuZero.
 
 **Suggested Videos/Resources**  
-- [AlphaZero Explained](https://www.youtube.com/watch?v=JxYX7NWWEAM)  
+- [AlphaZero Explained](https://www.youtube.com/watch?v=gsbkPpoxGQk)  
 - [AlphaZero Paper Walkthrough](https://www.youtube.com/watch?v=ANDAk9yxZ1s)
 
 ---
