@@ -1,3 +1,5 @@
+from network import Network, make_uniform_network
+
 class SharedStorage(object):
 
   def __init__(self):

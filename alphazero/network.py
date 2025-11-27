@@ -6,3 +6,5 @@ class Network(object):
   def get_weights(self):
     # Returns the weights of this network.
     return []
+  def make_uniform_network():
+    return Network()
