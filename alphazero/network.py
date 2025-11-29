@@ -1,12 +1,13 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 ACTION_SPACE = 12
 ## Convolutional Layer
 class ConvLayer(nn.Module):
     def __init__(self):
         super().__init__()
-        self.conv = nn.Conv2d(in_channels=8, out_channels=64, kernel_size=3, padding=1)
+        self.conv = nn.Conv2d(in_channels=5, out_channels=64, kernel_size=3, padding=1)
         self.bn = nn.BatchNorm2d(64)
     def forward(self, x):
         x = self.conv(x)
