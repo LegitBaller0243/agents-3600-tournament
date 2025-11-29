@@ -43,15 +43,15 @@ class OutBlock(nn.Module):
         self.logsoftmax = nn.LogSoftmax(dim=1)
         self.fc3 = nn.Linear(32*8*8, ACTION_SPACE)
     def forward(self, x, scalar_embed):
-        v = F.relu(self.val_bn(self.val_conv(x)))
+        v = F.relu(self.bn(self.conv1(x)))
         v = v.view(v.size(0), -1)
         v = torch.cat([v, scalar_embed], dim=1)   # inject scalar info
-        v = F.relu(self.val_fc1(v))
-        value = torch.tanh(self.val_fc2(v))
+        v = F.relu(self.fc1(v))
+        value = torch.tanh(self.fc2(v))
 
-        p = F.relu(self.pol_bn(self.pol_conv(x)))
+        p = F.relu(self.bn2(self.conv2(x)))
         p = p.view(p.size(0), -1)
-        policy_logits = self.pol_fc(p)
+        policy_logits = self.fc3(p)
 
         return value, policy_logits
 
@@ -94,5 +94,5 @@ class Network(nn.Module):
   def get_weights(self):
     # Returns the weights of this network.
     return self.state_dict()
-  def make_uniform_network():
+def make_uniform_network():
     return Network()

@@ -1,34 +1,32 @@
 class AlphaZeroConfig(object):
-    ##figure out what to change - 
   def __init__(self):
-    ### Self-Play
-    self.num_actors = 5000
+    self.selfplay_games_per_loop = 4      # You can increase later
 
-    self.num_sampling_moves = 30
-    self.max_moves = 512  # for chess and shogi, 722 for Go.
-    self.num_simulations = 800
+    # Exploration
+    self.num_sampling_moves = 10          # Early-game exploration
+    self.max_moves = 80                   # Chicken game lasts 40 moves per player
+    self.num_simulations = 50             # MCTS sims per move (reasonable for CPU)
 
-    # Root prior exploration noise.
-    self.root_dirichlet_alpha = 0.3  # for chess, 0.03 for Go and 0.15 for shogi.
+    # Dirichlet noise
+    self.root_dirichlet_alpha = 0.3
     self.root_exploration_fraction = 0.25
 
-    # UCB formula
-    self.pb_c_base = 19652
+    # UCB exploration constants
+    self.pb_c_base = 100                  # Much smaller
     self.pb_c_init = 1.25
 
-    ### Training
-    self.training_steps = int(700e3)
-    self.checkpoint_interval = int(1e3)
-    self.window_size = int(1e6)
-    self.batch_size = 4096
+    #### Training ####
+    self.training_loops = 50              # 50 loops of (self-play + train)
+    self.training_steps = 200             # SGD steps per loop
+    self.batch_size = 64                  # Appropriate for CPU
 
+    self.window_size = 20000              # Replay buffer size
     self.weight_decay = 1e-4
     self.momentum = 0.9
-    # Schedule for chess and shogi, Go starts at 2e-2 immediately.
-    self.learning_rate_schedule = {
-        0: 2e-1,
-        100e3: 2e-2,
-        300e3: 2e-3,
-        500e3: 2e-4
-    }
 
+    # Simple learning rate schedule
+    self.learning_rate_schedule = {
+        0: 1e-2,
+        20: 5e-3,
+        40: 1e-3,
+    }

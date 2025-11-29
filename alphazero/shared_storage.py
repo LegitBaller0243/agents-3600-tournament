@@ -1,4 +1,4 @@
-from network import Network, make_uniform_network
+from .network import Network, make_uniform_network
 
 class SharedStorage(object):
 
@@ -7,7 +7,7 @@ class SharedStorage(object):
 
   def latest_network(self) -> Network:
     if self._networks:
-      return self._networks[max(self._networks.iterkeys())]
+      return self._networks[max(self._networks.keys())]
     else:
       return make_uniform_network()  # policy -> uniform, value -> 0.5
 
