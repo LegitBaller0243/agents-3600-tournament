@@ -3,8 +3,8 @@ import pathlib
 import sys
 import time
 
-from board_utils import get_history_json
-from gameplay import play_game
+from .board_utils import get_history_json
+from .gameplay import play_game
 
 
 def main():

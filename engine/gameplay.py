@@ -2,12 +2,12 @@ import time
 from collections.abc import Iterable
 from typing import Set, Tuple
 
-from board_utils import get_board_string
-from game.board import Board
-from game.enums import Direction, MoveType, Result, ResultArbiter, WinReason
-from game.game_map import GameMap
-from game.trapdoor_manager import TrapdoorManager
-from player_process import PlayerProcess
+from .board_utils import get_board_string
+from .game.board import Board
+from .game.enums import Direction, MoveType, Result, ResultArbiter, WinReason
+from .game.game_map import GameMap
+from .game.trapdoor_manager import TrapdoorManager
+from .player_process import PlayerProcess
 
 
 def init_display(board, player_a_name, player_b_name):
