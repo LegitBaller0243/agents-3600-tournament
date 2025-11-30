@@ -1,5 +1,5 @@
 from alphazero.alphazero_config import AlphaZeroConfig
-from alphazero import alphazero
+from alphazero_train import alphazero
 
 if __name__ == "__main__":
     config = AlphaZeroConfig()
