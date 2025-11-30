@@ -284,3 +284,16 @@ class Environment:
             opponent_turns = self.board.turns_left_player
         
         return [your_turds, opponent_turds, your_turns, opponent_turns]
+    def load_from_board(self, board, sensor_data):
+        # Copy board
+        self.board = board.get_copy(build_history=False)
+
+        # Copy trapdoor manager if present
+        if hasattr(board, "trapdoor_manager"):
+            self.trapdoor_manager = board.trapdoor_manager
+
+        # Update belief
+        if sensor_data:
+            white_obs, black_obs = sensor_data
+            pos = self.board.chicken_player.get_location() if self.board.is_as_turn else self.board.chicken_enemy.get_location()
+            self.belief.update(pos, white_obs, black_obs)

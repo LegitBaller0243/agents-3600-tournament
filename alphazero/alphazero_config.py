@@ -1,32 +1,78 @@
-class AlphaZeroConfig(object):
-  def __init__(self):
-    self.selfplay_games_per_loop = 4      # You can increase later
+class AlphaZeroConfig:
+    """
+    AlphaZero configuration tuned for the Chicken Game (8×8, 40 moves/player).
 
-    # Exploration
-    self.num_sampling_moves = 10          # Early-game exploration
-    self.max_moves = 80                   # Chicken game lasts 40 moves per player
-    self.num_simulations = 50             # MCTS sims per move (reasonable for CPU)
+    Notes:
+    - Start with the SMALL configuration for debugging.
+    - Move to MEDIUM once everything runs.
+    - Use LARGE only on SLURM / multi-GPU training.
+    """
 
-    # Dirichlet noise
-    self.root_dirichlet_alpha = 0.3
-    self.root_exploration_fraction = 0.25
+    def __init__(self):
+        # ========================
+        # Self-Play Parameters
+        # ========================
+        self.selfplay_games_per_loop = 8  
+        #   Small:  4–8
+        #   Medium: 16–32
+        #   Large:  64–256 (cluster)
 
-    # UCB exploration constants
-    self.pb_c_base = 100                  # Much smaller
-    self.pb_c_init = 1.25
+        self.max_moves = 80                # 40 moves per player
+        self.num_sampling_moves = 12       # Temperature softmax period
+        self.num_simulations = 20         # MCTS sims per move
 
-    #### Training ####
-    self.training_loops = 50              # 50 loops of (self-play + train)
-    self.training_steps = 200             # SGD steps per loop
-    self.batch_size = 64                  # Appropriate for CPU
+        # Ranges:
+        #   Debug:    10–30
+        #   Medium:   50–150
+        #   Strong:   200–800 (expensive!)
 
-    self.window_size = 20000              # Replay buffer size
-    self.weight_decay = 1e-4
-    self.momentum = 0.9
+        # ========================
+        # Dirichlet Noise (exploration)
+        # ========================
+        self.root_dirichlet_alpha = 0.3
+        self.root_exploration_fraction = 0.25
 
-    # Simple learning rate schedule
-    self.learning_rate_schedule = {
-        0: 1e-2,
-        20: 5e-3,
-        40: 1e-3,
-    }
+        # ========================
+        # UCB Exploration Constants
+        # ========================
+        self.pb_c_base = 50             # Standard MuZero value
+        self.pb_c_init = 1.25
+
+        # ========================
+        # Training
+        # ========================
+        self.training_loops = 20          
+        # Recommended:
+        #   Minimum to see improvement: ~30
+        #   Medium strength: ~100–300
+        #   Tournament-level: 500–2000 loops (cluster)
+
+        self.training_steps = 150          
+        # Steps per loop:
+        #   CPU:      100–400
+        #   GPU:      500–2000
+        #   Cluster:  2000–10000
+
+        self.batch_size = 32
+        #   CPU:   64–128
+        #   GPU:   128–512
+        #   TPU:   512–2048
+
+        self.window_size = 10000           
+        # Replay memory size
+        #   Small:  10k
+        #   Medium: 50k
+        #   Large:  200k+ (cluster)
+
+        self.weight_decay = 1e-4
+        self.momentum = 0.9
+
+        # ========================
+        # Learning Rate Schedule
+        # ========================
+        self.learning_rate_schedule = {
+            0:   5e-3,
+            10:  2e-3,
+            25:  1e-3,
+            35:  5e-4,
+        }

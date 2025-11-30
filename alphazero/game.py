@@ -78,3 +78,11 @@ class Game(object):
 
   def to_play(self):
     return self.environment.to_play()
+  
+  @classmethod
+  def from_board(cls, board, sensor_data):
+      game = cls()
+      game.environment.load_from_board(board, sensor_data)
+      game.history = []
+      game.child_visits = []
+      return game
