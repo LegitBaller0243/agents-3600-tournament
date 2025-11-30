@@ -151,9 +151,7 @@ class TrapdoorBelief:
     
     def clone(self):
         """Return a deep copy of the belief state."""
-        cloned = TrapdoorBelief.__new__(TrapdoorBelief)
-        cloned.board_size = self.board_size
-
+        cloned = TrapdoorBelief(self.board_size)
         cloned.white_prob = self.white_prob.copy()
         cloned.black_prob = self.black_prob.copy()
         return cloned

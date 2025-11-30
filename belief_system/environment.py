@@ -2,6 +2,8 @@
 
 import sys
 import os
+from typing import Optional
+
 import numpy as np
 
 # Add the engine directory to the path to import game modules
@@ -41,24 +43,34 @@ class Environment:
         # Initialize chickens with spawns (same as TAs/teachers do)
         self.board.chicken_player.start(spawns[0], 0)  # Player A at spawns[0], even_chicken=0
         self.board.chicken_enemy.start(spawns[1], 1)    # Player B at spawns[1], even_chicken=1
+
+    @classmethod
+    def from_board(cls, board: Board, belief: Optional[TrapdoorBelief] = None):
+        """
+        Build an Environment around an existing Board copy.
+
+        This is used by the tournament agent so we can run search on the
+        referee-provided board while keeping our own trapdoor belief state.
+        """
+        env = cls.__new__(cls)  # bypass __init__ randomization
+        env.game_map = board.game_map
+        env.trapdoor_manager = None  # trapdoors are unknown in tournament play
+        env.board = board.get_copy(build_history=False)
+        env.belief = belief.clone() if belief is not None else TrapdoorBelief(board.game_map.MAP_SIZE)
+        return env
     
     # -----------------------------
     # Core Game Control
     # -----------------------------
     def clone(self):
-        cloned = Environment.__new__(Environment)
-
-        cloned.game_map = self.game_map
-        cloned.trapdoor_manager = self.trapdoor_manager.clone()
+        """Return a deep copy of environment (board + belief)."""
+        # Create a new environment but don't reinitialize (that would create new spawns/trapdoors)
+        cloned = Environment.__new__(Environment)  # Create without calling __init__
+        cloned.game_map = self.game_map  # GameMap is immutable, can share reference
         cloned.board = self.board.get_copy(build_history=False)
-
-        if hasattr(cloned.board, "trapdoor_manager"):
-            cloned.board.trapdoor_manager = cloned.trapdoor_manager
-
         cloned.belief = self.belief.clone()
-
+        cloned.trapdoor_manager = self.trapdoor_manager  # Share reference to same trapdoor manager
         return cloned
-
 
     def is_terminal(self):
         """Return True if the game is over."""
@@ -88,7 +100,7 @@ class Environment:
     # -----------------------------
     # Move Handling
     # -----------------------------
-    def apply_action(self, action: int):
+    def apply_action(self, action: int, observations=None):
         """
         Decode integer action into (Direction, MoveType),
         apply move to Board, update trapdoor belief.
@@ -101,7 +113,9 @@ class Environment:
         player_pos = self.board.chicken_player.get_location() if self.board.is_as_turn else self.board.chicken_enemy.get_location()
         
         # Get trapdoor observations from current position (before move)
-        observations = self.get_trapdoor_observations_at_position(player_pos)
+        obs_to_use = observations
+        if obs_to_use is None:
+            obs_to_use = self.get_trapdoor_observations_at_position(player_pos)
         
         # If it's player B's turn, reverse perspective for apply_move
         needs_reverse = not self.board.is_as_turn
@@ -116,8 +130,8 @@ class Environment:
             self.board.reverse_perspective()
         
         # Update belief with observations from the position we just left
-        if observations:
-            white_obs, black_obs = observations
+        if obs_to_use:
+            white_obs, black_obs = obs_to_use
             self.belief.update(player_pos, white_obs, black_obs)
 
     def decode_action(self, action: int):
@@ -284,16 +298,3 @@ class Environment:
             opponent_turns = self.board.turns_left_player
         
         return [your_turds, opponent_turds, your_turns, opponent_turns]
-    def load_from_board(self, board, sensor_data):
-        # Copy board
-        self.board = board.get_copy(build_history=False)
-
-        # Copy trapdoor manager if present
-        if hasattr(board, "trapdoor_manager"):
-            self.trapdoor_manager = board.trapdoor_manager
-
-        # Update belief
-        if sensor_data:
-            white_obs, black_obs = sensor_data
-            pos = self.board.chicken_player.get_location() if self.board.is_as_turn else self.board.chicken_enemy.get_location()
-            self.belief.update(pos, white_obs, black_obs)

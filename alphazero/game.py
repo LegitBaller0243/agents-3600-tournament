@@ -43,14 +43,10 @@ class Game(object):
       return self.environment.get_legal_actions()
 
   def clone(self):
-    cloned = Game.__new__(Game)
-
-    cloned.history = list(self.history)
-    cloned.child_visits = list(self.child_visits)
+    cloned = Game(list(self.history))
     cloned.environment = self.environment.clone()
-
+    cloned.child_visits = list(self.child_visits)
     return cloned
-
 
 
   def apply(self, action):
@@ -78,11 +74,3 @@ class Game(object):
 
   def to_play(self):
     return self.environment.to_play()
-  
-  @classmethod
-  def from_board(cls, board, sensor_data):
-      game = cls()
-      game.environment.load_from_board(board, sensor_data)
-      game.history = []
-      game.child_visits = []
-      return game

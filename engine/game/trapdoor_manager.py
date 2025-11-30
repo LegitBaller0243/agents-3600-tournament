@@ -88,14 +88,3 @@ class TrapdoorManager:
 
     def get_spawns(self):
         return self.spawns.copy()
-    def clone(self):
-        cloned = TrapdoorManager.__new__(TrapdoorManager)
-
-        # game_map is immutable and can be shared
-        cloned.game_map = self.game_map
-
-        # Deep copy spawns and trapdoors
-        cloned.spawns = self.spawns.copy()
-        cloned.trapdoors = self.trapdoors.copy()
-
-        return cloned
