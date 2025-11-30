@@ -12,14 +12,15 @@ class AlphaZeroConfig:
         # ========================
         # Self-Play Parameters
         # ========================
-        self.selfplay_games_per_loop = 8  
+        # Targeting ~1 hour of CPU time: bump games/simulations for stronger search.
+        self.selfplay_games_per_loop = 24  
         #   Small:  4–8
         #   Medium: 16–32
         #   Large:  64–256 (cluster)
 
         self.max_moves = 80                # 40 moves per player
         self.num_sampling_moves = 12       # Temperature softmax period
-        self.num_simulations = 20         # MCTS sims per move
+        self.num_simulations = 30         # MCTS sims per move
 
         # Ranges:
         #   Debug:    10–30
@@ -41,13 +42,13 @@ class AlphaZeroConfig:
         # ========================
         # Training
         # ========================
-        self.training_loops = 20          
+        self.training_loops = 40          
         # Recommended:
         #   Minimum to see improvement: ~30
         #   Medium strength: ~100–300
         #   Tournament-level: 500–2000 loops (cluster)
 
-        self.training_steps = 150          
+        self.training_steps = 30          
         # Steps per loop:
         #   CPU:      100–400
         #   GPU:      500–2000
@@ -58,11 +59,8 @@ class AlphaZeroConfig:
         #   GPU:   128–512
         #   TPU:   512–2048
 
-        self.window_size = 10000           
-        # Replay memory size
-        #   Small:  10k
-        #   Medium: 50k
-        #   Large:  200k+ (cluster)
+        self.window_size = 300           
+        # Replay memory size (kept small to avoid stale data)
 
         self.weight_decay = 1e-4
         self.momentum = 0.9
@@ -76,3 +74,9 @@ class AlphaZeroConfig:
             25:  1e-3,
             35:  5e-4,
         }
+
+        # ========================
+        # Evaluation (anti-regression)
+        # ========================
+        self.evaluation_games = 12          # head-to-head games per loop
+        self.evaluation_win_threshold = 0.55  # candidate must beat best with this win rate

@@ -1,5 +1,11 @@
-__pycache__/
 3600/
 
+__pycache__/
+*.py[cod]
+*$py.class
 
 *.log
+
+*.pth
+
+*/.DS_Store

@@ -11,6 +11,8 @@ import torch.optim as optim
 from typing import List
 from alphazero.utils import softmax_sample
 from alphazero.replay_buffer import ReplayBuffer
+from engine.game.enums import MoveType
+from alphazero.arena import evaluate_against_best
 
 
 def alphazero(config: AlphaZeroConfig):
@@ -19,6 +21,7 @@ def alphazero(config: AlphaZeroConfig):
     storage.save_network(0, network)
 
     replay_buffer = ReplayBuffer(config)
+    best_network = storage.latest_network()
 
     for training_iter in range(config.training_loops):
         print(f"\n[AlphaZero] Training iteration {training_iter+1}/{config.training_loops}")
@@ -30,11 +33,24 @@ def alphazero(config: AlphaZeroConfig):
         print(f"  [Training] Training network on {len(replay_buffer.buffer)} games...")
         avg_loss = train_network(config, storage, replay_buffer)
         print(f"  [Training] Average loss: {avg_loss:.4f}")
+
+        # Evaluate against previous best to avoid regressions (currently disabled for faster iteration).
+        # candidate_network = storage.latest_network()
+        # win_rate = evaluate_against_best(config, best_network, candidate_network, run_mcts)
+        # print(f"  [Eval] Candidate vs Best win rate: {win_rate:.2%}")
+        # if win_rate >= config.evaluation_win_threshold:
+        #     print("  [Eval] Candidate accepted as new best network.")
+        #     best_network = candidate_network
+        # else:
+        #     # Revert latest snapshot to best network.
+        #     last_key = max(storage._networks.keys())
+        #     storage._networks[last_key] = best_network
+        #     print("  [Eval] Candidate rejected; keeping previous best.")
         
         print(f"[AlphaZero] Completed training iteration {training_iter+1}/{config.training_loops}")
 
     # Return best/latest network
-    return storage.latest_network()
+    return best_network
 
 
 
@@ -70,10 +86,11 @@ def play_game(config: AlphaZeroConfig, network: Network):
 # To decide on an action, we run N simulations, always starting at the root of
 # the search tree and traversing the tree according to the UCB formula until we
 # reach a leaf node.
-def run_mcts(config: AlphaZeroConfig, game: Game, network: Network):
+def run_mcts(config: AlphaZeroConfig, game: Game, network: Network, add_noise: bool = True):
   root = Node(0)
   evaluate(root, game, network)
-  add_exploration_noise(config, root)
+  if add_noise:
+    add_exploration_noise(config, root)
 
   for _ in range(config.num_simulations):
     node = root
@@ -164,7 +181,12 @@ def evaluate(node: Node, game: Game, network: Network):
   policy_dict = {}
   for action in legal_actions:
     if action < len(policy):
-      policy_dict[action] = float(policy[action])
+      p = float(policy[action])
+      # Heuristic boost for egg moves to encourage laying eggs.
+      _, move_type = game.environment.decode_action(action)
+      if move_type == MoveType.EGG:
+        p *= 1.3
+      policy_dict[action] = p
   
   policy_sum = sum(policy_dict.values())
   if policy_sum > 0:
@@ -199,6 +221,8 @@ def add_exploration_noise(config: AlphaZeroConfig, node: Node):
   frac = config.root_exploration_fraction
   for a, n in zip(actions, noise):
     node.children[a].prior = node.children[a].prior * (1 - frac) + n * frac
+
+
 
 
 ######### End Self-Play ##########

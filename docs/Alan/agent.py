@@ -1,8 +1,14 @@
 import os
+import sys
 from typing import Callable, List, Optional, Tuple
 
 import numpy as np
 import torch
+
+# Ensure project root is on sys.path so we can import our packages when run from docs/.
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 
 from alphazero.alphazero_config import AlphaZeroConfig
 from alphazero.game import Game
@@ -12,9 +18,11 @@ from alphazero.network import Network
 from belief_system.environment import Environment
 from belief_system.trapdoor_belief import TrapdoorBelief
 from engine.game import board
+from engine.game.enums import MoveType
 
 
-WEIGHTS_FILE = os.path.join(os.path.dirname(__file__), "..", "alphazero_first_edition.pth")
+# Weights file lives in the repository root.
+WEIGHTS_FILE = os.path.join(ROOT_DIR, "alphazero_first_edition.pth")
 
 
 class PlayerAgent:
@@ -24,16 +32,16 @@ class PlayerAgent:
     """
 
     def __init__(self, board: board.Board, time_left: Callable):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cpu")
 
         # Keep a persistent belief over trapdoors and history for temperature logic.
         self.belief = TrapdoorBelief(board.game_map.MAP_SIZE)
         self.history: List[int] = []
 
-        # Config tuned for inference (smaller search budget than training).
+        # Config tuned for inference (smaller search budget than training) with root noise for exploration.
         self.config = AlphaZeroConfig()
-        self.config.num_simulations = 60
-        self.config.num_sampling_moves = 0  # deterministic after root search
+        self.config.num_simulations = 30
+        self.config.num_sampling_moves = 8  # early-game sampling
 
         self.network = self._load_network()
         self.network.to(self.device)
@@ -59,11 +67,13 @@ class PlayerAgent:
             remaining_time = time_left()
         except Exception:
             remaining_time = None
-        sims = self._simulations_for_time(remaining_time)
+        moves_left = board.turns_left_player if board.is_as_turn else board.turns_left_enemy
+        sims = self._simulations_for_time(remaining_time, moves_left)
 
         # Run a lightweight MCTS search.
         root = Node(0)
         self._evaluate(root, game)
+        self._add_root_noise(root)
         for _ in range(sims):
             node = root
             scratch_game = game.clone()
@@ -82,6 +92,13 @@ class PlayerAgent:
 
         # Translate integer action back to engine enums.
         direction, move_type = env.decode_action(action)
+
+        # Safety: if chosen move is invalid, fall back to any legal move.
+        if not board.is_valid_move(direction, move_type):
+            valid = board.get_valid_moves()
+            if valid:
+                direction, move_type = valid[0]
+
         return (direction, move_type)
 
     # -----------------------------
@@ -108,13 +125,20 @@ class PlayerAgent:
                 pass
         return network
 
-    def _simulations_for_time(self, remaining_time: Optional[float]) -> int:
-        if remaining_time is None:
+    def _simulations_for_time(self, remaining_time: Optional[float], moves_left: Optional[int]) -> int:
+        # time_left is a total clock (e.g., 360s for 40 moves). Scale sims by per-move budget.
+        if remaining_time is None or moves_left is None:
             return self.config.num_simulations
-        if remaining_time < 2.0:
+
+        per_move = remaining_time / max(1, moves_left)
+        if per_move < 1.0:
             return max(10, self.config.num_simulations // 3)
-        if remaining_time < 5.0:
-            return max(20, self.config.num_simulations // 2)
+        if per_move < 2.0:
+            return max(16, self.config.num_simulations // 2)
+        if per_move < 4.0:
+            return max(20, int(self.config.num_simulations * 0.75))
+        if remaining_time < 60.0:
+            return max(22, int(self.config.num_simulations * 0.9))
         return self.config.num_simulations
 
     def _select_action(self, game: Game, root: Node) -> int:
@@ -167,14 +191,36 @@ class PlayerAgent:
 
         priors = {}
         for action in legal_actions:
-            priors[action] = float(policy[action]) if action < len(policy) else 0.0
+            prior = float(policy[action]) if action < len(policy) else 0.0
+            # Heuristic boost for egg moves to promote scoring.
+            _, mv_type = env.decode_action(action)
+            if mv_type == MoveType.EGG:
+                prior *= 1.3
+            priors[action] = prior
         total = sum(priors.values())
         for action in legal_actions:
-            prob = priors[action] / total if total > 0 else 1.0 / len(legal_actions)
+            # Keep a floor so every legal action (including eggs) remains explorable.
+            prob = priors[action] / total if total > 0 else 0.0
+            prob = prob + 1e-3
             node.children[action] = Node(prob)
+        # Renormalize priors to sum to 1
+        norm = sum(child.prior for child in node.children.values())
+        if norm > 0:
+            for child in node.children.values():
+                child.prior /= norm
         return value
 
     def _backpropagate(self, search_path: List[Node], value: float, to_play: int):
         for node in search_path:
             node.value_sum += value if node.to_play == to_play else (1 - value)
             node.visit_count += 1
+
+    def _add_root_noise(self, root: Node):
+        actions = list(root.children.keys())
+        if not actions:
+            return
+        noise = np.random.gamma(self.config.root_dirichlet_alpha, 1, len(actions))
+        noise = noise / np.sum(noise)
+        frac = self.config.root_exploration_fraction
+        for a, n in zip(actions, noise):
+            root.children[a].prior = root.children[a].prior * (1 - frac) + n * frac

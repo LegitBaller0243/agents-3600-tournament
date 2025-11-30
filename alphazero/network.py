@@ -56,7 +56,7 @@ class OutBlock(nn.Module):
         return value, policy_logits
 
 class ScalarFeaturesHead(nn.Module):
-    def __init__(self, input_dim=4, hidden_dim=32, output_dim=32):
+    def __init__(self, input_dim=6, hidden_dim=32, output_dim=32):
         super().__init__()
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, output_dim)

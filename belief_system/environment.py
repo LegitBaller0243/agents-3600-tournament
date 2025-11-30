@@ -282,7 +282,9 @@ class Environment:
         Return [your_turds_left,
                 opponent_turds_left,
                 your_turns_remaining,
-                opponent_turns_remaining]
+                opponent_turns_remaining,
+                your_eggs_laid,
+                opponent_eggs_laid]
         """
         if self.board.is_as_turn:
             # Player A's turn
@@ -290,11 +292,15 @@ class Environment:
             opponent_turds = self.board.chicken_enemy.get_turds_left()
             your_turns = self.board.turns_left_player
             opponent_turns = self.board.turns_left_enemy
+            your_eggs = self.board.chicken_player.get_eggs_laid()
+            opponent_eggs = self.board.chicken_enemy.get_eggs_laid()
         else:
             # Player B's turn
             your_turds = self.board.chicken_enemy.get_turds_left()
             opponent_turds = self.board.chicken_player.get_turds_left()
             your_turns = self.board.turns_left_enemy
             opponent_turns = self.board.turns_left_player
+            your_eggs = self.board.chicken_enemy.get_eggs_laid()
+            opponent_eggs = self.board.chicken_player.get_eggs_laid()
         
-        return [your_turds, opponent_turds, your_turns, opponent_turns]
+        return [your_turds, opponent_turds, your_turns, opponent_turns, your_eggs, opponent_eggs]
