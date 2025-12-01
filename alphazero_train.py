@@ -1,3 +1,4 @@
+import os
 from alphazero.alphazero_config import AlphaZeroConfig
 from alphazero.network import Network
 from alphazero.shared_storage import SharedStorage
@@ -11,8 +12,30 @@ import torch.optim as optim
 from typing import List
 from alphazero.utils import softmax_sample
 from alphazero.replay_buffer import ReplayBuffer
-from engine.game.enums import MoveType
+from engine.game.enums import MoveType, Direction, loc_after_direction
 from alphazero.arena import evaluate_against_best
+
+
+def save_checkpoint(config: AlphaZeroConfig, network: Network, training_loop: int):
+    """Persist the network so training can resume after crashes."""
+    if config.checkpoint_interval <= 0 or not config.checkpoint_dir:
+        return
+    if (training_loop % config.checkpoint_interval) != 0:
+        return
+
+    os.makedirs(config.checkpoint_dir, exist_ok=True)
+    checkpoint_path = os.path.join(
+        config.checkpoint_dir, f"alphazero_loop_{training_loop}.pth"
+    )
+    torch.save(
+        {
+            "training_loop": training_loop,
+            "state_dict": network.state_dict(),
+            "config": config.__dict__,
+        },
+        checkpoint_path,
+    )
+    print(f"[Checkpoint] Saved to {checkpoint_path}")
 
 
 def alphazero(config: AlphaZeroConfig):
@@ -34,18 +57,16 @@ def alphazero(config: AlphaZeroConfig):
         avg_loss = train_network(config, storage, replay_buffer)
         print(f"  [Training] Average loss: {avg_loss:.4f}")
 
-        # Evaluate against previous best to avoid regressions (currently disabled for faster iteration).
-        # candidate_network = storage.latest_network()
-        # win_rate = evaluate_against_best(config, best_network, candidate_network, run_mcts)
-        # print(f"  [Eval] Candidate vs Best win rate: {win_rate:.2%}")
-        # if win_rate >= config.evaluation_win_threshold:
-        #     print("  [Eval] Candidate accepted as new best network.")
-        #     best_network = candidate_network
-        # else:
-        #     # Revert latest snapshot to best network.
-        #     last_key = max(storage._networks.keys())
-        #     storage._networks[last_key] = best_network
-        #     print("  [Eval] Candidate rejected; keeping previous best.")
+        candidate_network = storage.latest_network()
+        # Evaluate against previous best and log win rate (no rejection threshold).
+        if (training_iter + 1) % config.evaluation_interval == 0:
+            win_rate = evaluate_against_best(config, best_network, candidate_network, run_mcts)
+            print(f"  [Eval] Candidate vs Best win rate: {win_rate:.2%}")
+            best_network = candidate_network
+        else:
+            print(f"  [Eval] Skipped (will evaluate every {config.evaluation_interval} loops)")
+
+        save_checkpoint(config, candidate_network, training_iter + 1)
         
         print(f"[AlphaZero] Completed training iteration {training_iter+1}/{config.training_loops}")
 
@@ -110,6 +131,7 @@ def run_mcts(config: AlphaZeroConfig, game: Game, network: Network, add_noise: b
 def select_action(config: AlphaZeroConfig, game: Game, root: Node):
   visit_counts = [(child.visit_count, action)
                   for action, child in root.children.items()]
+
   if len(game.history) < config.num_sampling_moves:
     _, action = softmax_sample(visit_counts)
   else:
@@ -179,15 +201,30 @@ def evaluate(node: Node, game: Game, network: Network):
   # Normalize policy over legal actions only
   # Policy is a probability distribution over all actions (12 actions)
   policy_dict = {}
+  board = game.environment.board
+  acting_chicken = board.chicken_player if board.is_as_turn else board.chicken_enemy
   for action in legal_actions:
     if action < len(policy):
       p = float(policy[action])
-      # Heuristic boost for egg moves to encourage laying eggs.
-      _, move_type = game.environment.decode_action(action)
-      if move_type == MoveType.EGG:
-        p *= 1.3
-      policy_dict[action] = p
-  
+      direction, mv = game.environment.decode_action(action)
+      if mv == MoveType.EGG:
+        p *= 3.0
+      elif mv == MoveType.TURD:
+        p *= 1.5
+      elif mv == MoveType.PLAIN:
+        # If a plain move steps onto an egg-able square for the acting chicken, boost it.
+        dest = loc_after_direction(acting_chicken.get_location(), Direction(direction))
+        if board.is_valid_cell(dest):
+          parity_ok = (dest[0] + dest[1]) % 2 == acting_chicken.even_chicken
+          blocked = (
+              dest in board.eggs_player or dest in board.turds_player
+              or dest in board.eggs_enemy or dest in board.turds_enemy
+          )
+          if parity_ok and not blocked:
+            p *= 1.5
+      # Add small floor so rare moves stay in play.
+      policy_dict[action] = max(p, 0.0) + 1e-3
+
   policy_sum = sum(policy_dict.values())
   if policy_sum > 0:
     for action, p in policy_dict.items():
@@ -205,7 +242,8 @@ def evaluate(node: Node, game: Game, network: Network):
 # tree to the root.
 def backpropagate(search_path: List[Node], value: float, to_play):
   for node in search_path:
-    node.value_sum += value if node.to_play == to_play else (1 - value)
+    # Propagate value from the perspective of the player who just moved.
+    node.value_sum += value if node.to_play == to_play else -value
     node.visit_count += 1
 
 
@@ -324,12 +362,18 @@ def update_weights(optimizer: optim.Optimizer, network: Network, batch,
   
   # Policy loss: target_policy is a distribution over actions
   # Use KL divergence between log_softmax(policy_logits) and target_policy
-  policy_loss = nn.functional.kl_div(
-    nn.functional.log_softmax(policy_logits, dim=1),
-    target_policies_tensor + 1e-8,  # Add small epsilon to avoid log(0)
-    reduction='batchmean'
-  )
-  
+  log_probs = nn.functional.log_softmax(policy_logits, dim=1)
+  eps = 1e-8
+  # Type-weighted policy loss: egg/turd errors are penalized more.
+  with torch.no_grad():
+    action_indices = torch.arange(policy_logits.size(1), device=device)
+    move_types = action_indices % 3  # 0 plain, 1 egg, 2 turd
+    weights = torch.ones_like(log_probs)
+    weights[:, move_types == 1] *= 2.0  # eggs
+    weights[:, move_types == 2] *= 1.5  # turds
+  kl_per_action = (target_policies_tensor + eps) * (torch.log(target_policies_tensor + eps) - log_probs)
+  policy_loss = (weights * kl_per_action).sum() / weights.sum()
+
   total_loss = value_loss + policy_loss
   
   # Backward pass

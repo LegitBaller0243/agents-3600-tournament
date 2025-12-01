@@ -1,82 +1,56 @@
 class AlphaZeroConfig:
-    """
-    AlphaZero configuration tuned for the Chicken Game (8×8, 40 moves/player).
-
-    Notes:
-    - Start with the SMALL configuration for debugging.
-    - Move to MEDIUM once everything runs.
-    - Use LARGE only on SLURM / multi-GPU training.
-    """
-
     def __init__(self):
-        # ========================
-        # Self-Play Parameters
-        # ========================
-        # Targeting ~1 hour of CPU time: bump games/simulations for stronger search.
-        self.selfplay_games_per_loop = 24  
-        #   Small:  4–8
-        #   Medium: 16–32
-        #   Large:  64–256 (cluster)
-
-        self.max_moves = 80                # 40 moves per player
-        self.num_sampling_moves = 12       # Temperature softmax period
-        self.num_simulations = 30         # MCTS sims per move
-
-        # Ranges:
-        #   Debug:    10–30
-        #   Medium:   50–150
-        #   Strong:   200–800 (expensive!)
 
         # ========================
-        # Dirichlet Noise (exploration)
+        # Self-Play
         # ========================
-        self.root_dirichlet_alpha = 0.3
+        self.selfplay_games_per_loop = 16     # Very small, allows 8–12 loops total
+        self.max_moves = 80
+        self.num_sampling_moves = 6
+
+        # Critical: FAST MCTS
+        self.num_simulations = 40             # Fast AND enough to learn
+
+        # ========================
+        # Dirichlet Noise
+        # ========================
+        self.root_dirichlet_alpha = 0.25
         self.root_exploration_fraction = 0.25
 
         # ========================
-        # UCB Exploration Constants
+        # PUCT
         # ========================
-        self.pb_c_base = 50             # Standard MuZero value
-        self.pb_c_init = 1.25
+        self.pb_c_base = 50
+        self.pb_c_init = 1.0
 
         # ========================
         # Training
         # ========================
-        self.training_loops = 40          
-        # Recommended:
-        #   Minimum to see improvement: ~30
-        #   Medium strength: ~100–300
-        #   Tournament-level: 500–2000 loops (cluster)
-
-        self.training_steps = 30          
-        # Steps per loop:
-        #   CPU:      100–400
-        #   GPU:      500–2000
-        #   Cluster:  2000–10000
-
-        self.batch_size = 32
-        #   CPU:   64–128
-        #   GPU:   128–512
-        #   TPU:   512–2048
-
-        self.window_size = 300           
-        # Replay memory size (kept small to avoid stale data)
-
-        self.weight_decay = 1e-4
+        self.training_loops = 30   # You run until time runs out
+        self.training_steps = 400     # 400 SGD steps per loop
+        self.batch_size = 64
+        self.window_size = 1000       # Small but sufficient for a tiny experiment
         self.momentum = 0.9
+        self.weight_decay = 1e-4
 
         # ========================
         # Learning Rate Schedule
         # ========================
         self.learning_rate_schedule = {
-            0:   5e-3,
-            10:  2e-3,
-            25:  1e-3,
-            35:  5e-4,
+            0:   3e-3,
+            5:   2e-3,
+            10:  1e-3,
         }
 
         # ========================
-        # Evaluation (anti-regression)
+        # Arena
         # ========================
-        self.evaluation_games = 12          # head-to-head games per loop
-        self.evaluation_win_threshold = 0.55  # candidate must beat best with this win rate
+        self.evaluation_games = 10    # Keeps loop fast
+        self.evaluation_win_threshold = 0.55
+        self.evaluation_interval = 5
+
+        # ========================
+        # Checkpointing
+        # ========================
+        self.checkpoint_dir = "checkpoints"
+        self.checkpoint_interval = 5

@@ -35,20 +35,29 @@ class Game(object):
 
   def terminal_value(self, to_play):
     # Game specific value.
-    # Returns 1 if to_play wins, -1 if to_play loses, 0 if tie
-    base = self.environment.get_terminal_value(to_play)
-    if base != 0:
-      return base
-    # Reward shaping on eggs laid when result is a tie.
+    # Wins are +1.0. Losses are scaled by how far behind you are in eggs.
     board = self.environment.board
-    eggs_player = board.chicken_player.get_eggs_laid()
-    eggs_enemy = board.chicken_enemy.get_eggs_laid()
+    base = self.environment.get_terminal_value(to_play)
+
+    if base == 1:
+      return 1.0
+
     if to_play == 0:
-      egg_diff = eggs_player - eggs_enemy
+      my_eggs = board.chicken_player.get_eggs_laid()
+      opp_eggs = board.chicken_enemy.get_eggs_laid()
     else:
-      egg_diff = eggs_enemy - eggs_player
-    # Normalize to a small shaping signal to avoid overpowering win/loss.
-    return max(-0.5, min(0.5, 0.1 * egg_diff))
+      my_eggs = board.chicken_enemy.get_eggs_laid()
+      opp_eggs = board.chicken_player.get_eggs_laid()
+
+    if base == -1:
+      diff = max(0, opp_eggs - my_eggs)
+      total = max(1, my_eggs + opp_eggs)
+      scaled = diff / total  # in (0,1]
+      # Ensure some penalty for losses, but scale with closeness.
+      return -max(0.2, min(1.0, scaled))
+
+    # Tie or non-terminal
+    return 0.0
 
 
   def legal_actions(self):
