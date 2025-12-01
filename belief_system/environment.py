@@ -145,7 +145,13 @@ class Environment:
         """Return a list of integers representing legal actions."""
         # Get valid moves from board based on whose turn it is
         enemy = not self.board.is_as_turn
-        valid_moves = self.board.get_valid_moves(enemy=enemy)
+        if enemy:
+            # Mirror the board as in apply_action to reuse player-centric logic.
+            self.board.reverse_perspective()
+            valid_moves = self.board.get_valid_moves(enemy=False)
+            self.board.reverse_perspective()
+        else:
+            valid_moves = self.board.get_valid_moves(enemy=False)
         
         # Convert to action indices
         legal_actions = []

@@ -4,17 +4,17 @@ class AlphaZeroConfig:
         # ========================
         # Self-Play
         # ========================
-        self.selfplay_games_per_loop = 16     # Very small, allows 8–12 loops total
+        self.selfplay_games_per_loop = 32     # Very small, allows 8–12 loops total
         self.max_moves = 80
         self.num_sampling_moves = 6
 
         # Critical: FAST MCTS
-        self.num_simulations = 40             # Fast AND enough to learn
+        self.num_simulations = 40             # More simulations for deeper search
 
         # ========================
         # Dirichlet Noise
         # ========================
-        self.root_dirichlet_alpha = 0.25
+        self.root_dirichlet_alpha = 0.15  # slightly lower to reduce injected noise
         self.root_exploration_fraction = 0.25
 
         # ========================
@@ -43,14 +43,46 @@ class AlphaZeroConfig:
         }
 
         # ========================
+        # Target Sharpening
+        # ========================
+        # Temperature applied to MCTS visit counts before normalizing as training targets (<1.0 = sharper).
+        self.training_target_temperature = 0.75
+
+        # ========================
         # Arena
         # ========================
-        self.evaluation_games = 10    # Keeps loop fast
+        self.evaluation_games = 40
         self.evaluation_win_threshold = 0.55
-        self.evaluation_interval = 5
+        self.evaluation_interval = 10
+        # During the first N loops, auto-promote candidate to best after eval.
+        self.early_promotion_loops = 10
 
         # ========================
         # Checkpointing
         # ========================
         self.checkpoint_dir = "checkpoints"
         self.checkpoint_interval = 5
+
+        # ========================
+        # Logging / Debug
+        # ========================
+        # Number of arena games to log detailed MCTS policy/visit info for.
+        self.arena_log_games = 3
+        # Keep in-memory network snapshots; set False for quick local tests.
+        self.save_networks = True
+
+        # ========================
+        # Egg Prior/Reward Shaping
+        # ========================
+        # Global boost to egg priors (applied to network policy before normalization).
+        self.egg_prior_boost = 1.5
+        # Shaping reward per egg differential added to value targets.
+        self.shaping_reward_per_egg = 0.1
+        # Number of initial training loops to force egg moves when legal during self-play.
+        self.scripted_egg_loops = 10
+
+        # ========================
+        # Target Sharpening
+        # ========================
+        # Temperature applied to MCTS visit counts before normalizing as training targets (<1.0 = sharper).
+        self.training_target_temperature = 0.75

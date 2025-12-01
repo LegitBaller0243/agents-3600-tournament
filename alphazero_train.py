@@ -1,4 +1,5 @@
 import os
+import copy
 from alphazero.alphazero_config import AlphaZeroConfig
 from alphazero.network import Network
 from alphazero.shared_storage import SharedStorage
@@ -39,39 +40,55 @@ def save_checkpoint(config: AlphaZeroConfig, network: Network, training_loop: in
 
 
 def alphazero(config: AlphaZeroConfig):
-    storage = SharedStorage()
-    network = Network()
+  storage = SharedStorage()
+  network = Network()
+  if config.save_networks:
     storage.save_network(0, network)
+  else:
+    storage.use_live_network(network)
 
-    replay_buffer = ReplayBuffer(config)
-    best_network = storage.latest_network()
+  replay_buffer = ReplayBuffer(config)
+  best_network = storage.latest_network()
+  if not config.save_networks:
+    best_network = copy.deepcopy(best_network)
 
-    for training_iter in range(config.training_loops):
-        print(f"\n[AlphaZero] Training iteration {training_iter+1}/{config.training_loops}")
+  for training_iter in range(config.training_loops):
+    print(f"\n[AlphaZero] Training iteration {training_iter+1}/{config.training_loops}")
+    
+    num_games = config.selfplay_games_per_loop
+    print(f"  [Self-Play] Generating {num_games} games...")
+    force_egg = training_iter < config.scripted_egg_loops
+    run_selfplay(config, storage, replay_buffer, num_games, force_egg=force_egg)
         
-        num_games = config.selfplay_games_per_loop
-        print(f"  [Self-Play] Generating {num_games} games...")
-        run_selfplay(config, storage, replay_buffer, num_games)
+    print(f"  [Training] Training network on {len(replay_buffer.buffer)} games...")
+    avg_loss = train_network(config, storage, replay_buffer)
+    print(f"  [Training] Average loss: {avg_loss:.4f}")
+
+  candidate_network = storage.latest_network()
+  if not config.save_networks:
+    candidate_network = copy.deepcopy(candidate_network)
+  # Early window: auto-promote without arena to accelerate egg behavior adoption.
+  if (training_iter + 1) <= config.early_promotion_loops:
+    best_network = candidate_network if config.save_networks else copy.deepcopy(candidate_network)
+    print(f"  [Eval] Early window auto-promotion (loop {training_iter + 1}/{config.early_promotion_loops})")
+    # After early window: evaluate against previous best with gating.
+    elif (training_iter + 1) % config.evaluation_interval == 0:
+      win_rate = evaluate_against_best(config, best_network, candidate_network, run_mcts)
+      print(f"  [Eval] Candidate vs Best win rate: {win_rate:.2%}")
+      if win_rate >= config.evaluation_win_threshold:
+        best_network = candidate_network if config.save_networks else copy.deepcopy(candidate_network)
+        print(f"  [Eval] Accepted new best network (threshold={config.evaluation_win_threshold:.0%})")
+      else:
+        print(f"  [Eval] Rejected candidate (threshold={config.evaluation_win_threshold:.0%})")
+    else:
+      print(f"  [Eval] Skipped (will evaluate every {config.evaluation_interval} loops)")
+
+    save_checkpoint(config, candidate_network, training_iter + 1)
         
-        print(f"  [Training] Training network on {len(replay_buffer.buffer)} games...")
-        avg_loss = train_network(config, storage, replay_buffer)
-        print(f"  [Training] Average loss: {avg_loss:.4f}")
+    print(f"[AlphaZero] Completed training iteration {training_iter+1}/{config.training_loops}")
 
-        candidate_network = storage.latest_network()
-        # Evaluate against previous best and log win rate (no rejection threshold).
-        if (training_iter + 1) % config.evaluation_interval == 0:
-            win_rate = evaluate_against_best(config, best_network, candidate_network, run_mcts)
-            print(f"  [Eval] Candidate vs Best win rate: {win_rate:.2%}")
-            best_network = candidate_network
-        else:
-            print(f"  [Eval] Skipped (will evaluate every {config.evaluation_interval} loops)")
-
-        save_checkpoint(config, candidate_network, training_iter + 1)
-        
-        print(f"[AlphaZero] Completed training iteration {training_iter+1}/{config.training_loops}")
-
-    # Return best/latest network
-    return best_network
+  # Return best/latest network
+  return best_network
 
 
 
@@ -82,10 +99,10 @@ def alphazero(config: AlphaZeroConfig):
 # snapshot, produces a game and makes it available to the training job by
 # writing it to a shared replay buffer.
 def run_selfplay(config: AlphaZeroConfig, storage: SharedStorage,
-                 replay_buffer: ReplayBuffer, num_games: int):
+                 replay_buffer: ReplayBuffer, num_games: int, force_egg: bool = False):
   for game_idx in range(num_games):
     network = storage.latest_network()
-    game = play_game(config, network)
+    game = play_game(config, network, force_egg=force_egg)
     replay_buffer.save_game(game)
     if (game_idx + 1) % 10 == 0:
       print(f"  [Self-Play] Generated {game_idx + 1}/{num_games} games")
@@ -94,12 +111,20 @@ def run_selfplay(config: AlphaZeroConfig, storage: SharedStorage,
 # Each game is produced by starting at the initial board position, then
 # repeatedly executing a Monte Carlo Tree Search to generate moves until the end
 # of the game is reached.
-def play_game(config: AlphaZeroConfig, network: Network):
+def play_game(config: AlphaZeroConfig, network: Network, force_egg: bool = False):
   game = Game()
+  # Make shaping reward available to the environment if supported.
+  if hasattr(game, "environment"):
+    setattr(game.environment, "shaping_reward_per_egg", config.shaping_reward_per_egg)
   while not game.terminal() and len(game.history) < config.max_moves:
     action, root = run_mcts(config, game, network)
+    if force_egg:
+      legal = game.legal_actions()
+      egg_actions = [a for a in legal if game.environment.decode_action(a)[1] == MoveType.EGG]
+      if egg_actions:
+        action = egg_actions[0]
     game.apply(action)
-    game.store_search_statistics(root)
+    game.store_search_statistics(root, temperature=config.training_target_temperature)
   return game
 
 
@@ -109,7 +134,7 @@ def play_game(config: AlphaZeroConfig, network: Network):
 # reach a leaf node.
 def run_mcts(config: AlphaZeroConfig, game: Game, network: Network, add_noise: bool = True):
   root = Node(0)
-  evaluate(root, game, network)
+  evaluate(root, game, network, config)
   if add_noise:
     add_exploration_noise(config, root)
 
@@ -123,7 +148,7 @@ def run_mcts(config: AlphaZeroConfig, game: Game, network: Network, add_noise: b
       scratch_game.apply(action)
       search_path.append(node)
 
-    value = evaluate(node, scratch_game, network)
+    value = evaluate(node, scratch_game, network, config)
     backpropagate(search_path, value, scratch_game.to_play())
   return select_action(config, game, root), root
 
@@ -159,37 +184,37 @@ def ucb_score(config: AlphaZeroConfig, parent: Node, child: Node):
 
 
 # We use the neural network to obtain a value and policy prediction.
-def evaluate(node: Node, game: Game, network: Network):
+def evaluate(node: Node, game: Game, network: Network | None = None, config: AlphaZeroConfig | None = None):
   # Get image tensor and scalar features
   image_tensor = game.make_image(-1)
   scalar_features = game.make_scalar_features()
-  
-  # Convert to numpy arrays if needed
-  if isinstance(image_tensor, torch.Tensor):
-    image_tensor = image_tensor.cpu().numpy()
-  if isinstance(scalar_features, torch.Tensor):
-    scalar_features = scalar_features.cpu().numpy()
-  
-  # Convert to torch tensors
-  image_tensor = torch.FloatTensor(image_tensor)
-  scalar_features = torch.FloatTensor(scalar_features)
-  
+
+  # Keep tensors as tensors; convert only if needed
+  if not torch.is_tensor(image_tensor):
+    image_tensor = torch.tensor(image_tensor, dtype=torch.float32)
+  else:
+    image_tensor = image_tensor.float()
+
+  if not torch.is_tensor(scalar_features):
+    scalar_features = torch.tensor(scalar_features, dtype=torch.float32)
+  else:
+    scalar_features = scalar_features.float()
+
   # Add batch dimension if needed
   if image_tensor.dim() == 3:
     image_tensor = image_tensor.unsqueeze(0)
   if scalar_features.dim() == 1:
     scalar_features = scalar_features.unsqueeze(0)
-  
-  # Set network to eval mode and get predictions
+
   device = next(network.parameters()).device
-  image_tensor = image_tensor.to(device)
-  scalar_features = scalar_features.to(device)
-  
+  image_tensor = image_tensor.to(device, non_blocking=True)
+  scalar_features = scalar_features.to(device, non_blocking=True)
+
   value, policy = network.inference(image_tensor, scalar_features)
-  
-  # Convert to numpy for easier manipulation
+
+  # Convert only the small outputs for Python-side logic
   value = value.item() if isinstance(value, torch.Tensor) else float(value)
-  policy = policy.squeeze(0).cpu().numpy() if isinstance(policy, torch.Tensor) else policy
+  policy = policy.squeeze(0).detach().cpu().numpy()
 
   # Expand the node.
   node.to_play = game.to_play()
@@ -208,7 +233,8 @@ def evaluate(node: Node, game: Game, network: Network):
       p = float(policy[action])
       direction, mv = game.environment.decode_action(action)
       if mv == MoveType.EGG:
-        p *= 3.0
+        egg_boost = config.egg_prior_boost if config is not None else 1.0
+        p *= (3.0 * egg_boost)
       elif mv == MoveType.TURD:
         p *= 1.5
       elif mv == MoveType.PLAIN:
@@ -281,6 +307,8 @@ def train_network(config: AlphaZeroConfig, storage: SharedStorage,
   optimizer = optim.SGD(network.parameters(), lr=1e-2, momentum=config.momentum, weight_decay=config.weight_decay)
   
   total_loss = 0.0
+  egg_top_visit = 0
+  egg_sample_count = 0
   for i in range(config.training_steps):
     # Update learning rate according to schedule
     lr = get_learning_rate(i, config.learning_rate_schedule)
@@ -289,16 +317,28 @@ def train_network(config: AlphaZeroConfig, storage: SharedStorage,
     
     batch = replay_buffer.sample_batch()
     if len(batch) > 0:
-      loss = update_weights(optimizer, network, batch, config.weight_decay, device)
+      loss, batch_top_eggs, batch_samples = update_weights(
+          optimizer, network, batch, config.weight_decay, device)
       total_loss += loss
-    else:
-      break  # No data to train on
+      egg_top_visit += batch_top_eggs
+      egg_sample_count += batch_samples
+  else:
+    break  # No data to train on
   
   # Save updated network
-  next_step = (max(storage._networks.keys()) + 1) if storage._networks else 0
-  storage.save_network(next_step, network)
+  if config.save_networks:
+    next_step = (max(storage._networks.keys()) + 1) if storage._networks else 0
+    storage.save_network(next_step, network)
+  else:
+    storage.use_live_network(network)
   
   avg_loss = total_loss / config.training_steps if config.training_steps > 0 else 0.0
+  if egg_sample_count > 0:
+    egg_fraction = egg_top_visit / egg_sample_count
+    print(
+        f"  [Training] Target top-visit egg fraction: {egg_fraction:.2%} "
+        f"({int(egg_top_visit)}/{int(egg_sample_count)} states)"
+    )
   return avg_loss
 
 
@@ -319,7 +359,7 @@ def update_weights(optimizer: optim.Optimizer, network: Network, batch,
   optimizer.zero_grad()
   
   if len(batch) == 0:
-    return 0.0
+    return 0.0, 0, 0
   
   value_loss_fn = nn.MSELoss()
   
@@ -336,23 +376,17 @@ def update_weights(optimizer: optim.Optimizer, network: Network, batch,
       # Backward compatibility
       image, (target_value, target_policy) = item
       scalar_feat = np.zeros(4)  # Default scalar features
-    
-    # Convert to numpy if needed
-    if isinstance(image, torch.Tensor):
-      image = image.cpu().numpy()
-    if isinstance(scalar_feat, torch.Tensor):
-      scalar_feat = scalar_feat.cpu().numpy()
-    
-    images.append(image)
-    scalar_features_list.append(scalar_feat)
-    target_values.append(target_value)
-    target_policies.append(target_policy)
+    # Keep torch tensors if provided; otherwise convert from numpy/list
+    images.append(torch.as_tensor(image, dtype=torch.float32))
+    scalar_features_list.append(torch.as_tensor(scalar_feat, dtype=torch.float32))
+    target_values.append(torch.as_tensor(target_value, dtype=torch.float32))
+    target_policies.append(torch.as_tensor(target_policy, dtype=torch.float32))
   
   # Convert to tensors and stack
-  images_tensor = torch.FloatTensor(np.array(images)).to(device)
-  scalar_features_tensor = torch.FloatTensor(np.array(scalar_features_list)).to(device)
-  target_values_tensor = torch.FloatTensor(np.array(target_values)).to(device).unsqueeze(1)
-  target_policies_tensor = torch.FloatTensor(np.array(target_policies)).to(device)
+  images_tensor = torch.stack(images).to(device)
+  scalar_features_tensor = torch.stack(scalar_features_list).to(device)
+  target_values_tensor = torch.stack(target_values).to(device).unsqueeze(1)
+  target_policies_tensor = torch.stack(target_policies).to(device)
   
   # Forward pass
   values, policy_logits = network(images_tensor, scalar_features_tensor)
@@ -375,12 +409,15 @@ def update_weights(optimizer: optim.Optimizer, network: Network, batch,
   policy_loss = (weights * kl_per_action).sum() / weights.sum()
 
   total_loss = value_loss + policy_loss
+  batch_top_visit = target_policies_tensor.argmax(dim=1)
+  egg_top_visit = int((batch_top_visit % 3 == int(MoveType.EGG)).sum().item())
+  sample_count = int(batch_top_visit.numel())
   
   # Backward pass
   total_loss.backward()
   optimizer.step()
   
-  return total_loss.item()
+  return total_loss.item(), egg_top_visit, sample_count
 
 ######### End Training ###########
 ##################################

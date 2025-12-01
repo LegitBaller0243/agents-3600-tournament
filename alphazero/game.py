@@ -74,10 +74,20 @@ class Game(object):
     self.environment.apply_action(action)
     self.history.append(action)
 
-  def store_search_statistics(self, root):
+  def store_search_statistics(self, root, temperature: float = 1.0):
     sum_visits = sum(child.visit_count for child in root.children.values())
+    if sum_visits == 0:
+      self.child_visits.append([0 for _ in range(self.num_actions)])
+      return
+
+    temp = max(1e-3, float(temperature))
+    adjusted = {}
+    for a, child in root.children.items():
+      # Sharpen or soften target distribution based on visit counts.
+      adjusted[a] = (child.visit_count / sum_visits) ** (1.0 / temp)
+    norm = sum(adjusted.values()) if adjusted else 1.0
     self.child_visits.append([
-        root.children[a].visit_count / sum_visits if a in root.children else 0
+        (adjusted[a] / norm) if a in adjusted else 0.0
         for a in range(self.num_actions)
     ])
 
@@ -90,7 +100,26 @@ class Game(object):
 
 
   def make_target(self, state_index: int):
-    return (self.terminal_value(state_index % 2),
+    base_value = self.terminal_value(state_index % 2)
+    shaping = 0.0
+    try:
+      # Small shaping toward egg advantage
+      board = self.environment.board
+      if state_index % 2 == 0:
+        my_eggs = board.chicken_player.get_eggs_laid()
+        opp_eggs = board.chicken_enemy.get_eggs_laid()
+      else:
+        my_eggs = board.chicken_enemy.get_eggs_laid()
+        opp_eggs = board.chicken_player.get_eggs_laid()
+      diff = my_eggs - opp_eggs
+      shaping_coeff = getattr(self.environment, "shaping_reward_per_egg", None)
+      if shaping_coeff is None:
+        # Fallback to a default; environment may not carry config reference.
+        shaping_coeff = 0.0
+      shaping = shaping_coeff * diff
+    except Exception:
+      shaping = 0.0
+    return (base_value + shaping,
             self.child_visits[state_index])
 
   def to_play(self):
