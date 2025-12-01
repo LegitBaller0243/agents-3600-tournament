@@ -102,6 +102,7 @@ class Game(object):
   def make_target(self, state_index: int):
     base_value = self.terminal_value(state_index % 2)
     shaping = 0.0
+    immediate = 0.0
     try:
       # Small shaping toward egg advantage
       board = self.environment.board
@@ -117,9 +118,15 @@ class Game(object):
         # Fallback to a default; environment may not carry config reference.
         shaping_coeff = 0.0
       shaping = shaping_coeff * diff
+      # Immediate bonus when an egg was placed on this move to accelerate value learning.
+      if state_index < len(self.history):
+        _, mv = self.environment.decode_action(self.history[state_index])
+        if mv == MoveType.EGG:
+          immediate = getattr(self.environment, "egg_immediate_value", 0.0)
     except Exception:
       shaping = 0.0
-    return (base_value + shaping,
+      immediate = 0.0
+    return (base_value + shaping + immediate,
             self.child_visits[state_index])
 
   def to_play(self):

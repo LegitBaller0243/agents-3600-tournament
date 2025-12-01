@@ -4,12 +4,15 @@ class AlphaZeroConfig:
         # ========================
         # Self-Play
         # ========================
-        self.selfplay_games_per_loop = 32     # Very small, allows 8–12 loops total
+        self.selfplay_games_per_loop = 64     # More games per loop to stabilize policy/value heads
         self.max_moves = 80
-        self.num_sampling_moves = 6
+        # Keep temperature-based sampling alive through the midgame.
+        self.num_sampling_moves = 20
+        self.midgame_temperature_start = 20
+        self.midgame_temperature_span = 20
 
         # Critical: FAST MCTS
-        self.num_simulations = 40             # More simulations for deeper search
+        self.num_simulations = 64             # More simulations for deeper search
 
         # ========================
         # Dirichlet Noise
@@ -47,6 +50,8 @@ class AlphaZeroConfig:
         # ========================
         # Temperature applied to MCTS visit counts before normalizing as training targets (<1.0 = sharper).
         self.training_target_temperature = 0.75
+        # Encourage exploration during optimization; higher adds more entropy pressure.
+        self.policy_entropy_coef = 2e-3
 
         # ========================
         # Arena
@@ -67,7 +72,7 @@ class AlphaZeroConfig:
         # Logging / Debug
         # ========================
         # Number of arena games to log detailed MCTS policy/visit info for.
-        self.arena_log_games = 3
+        self.arena_log_games = 1
         # Keep in-memory network snapshots; set False for quick local tests.
         self.save_networks = True
 
@@ -78,11 +83,7 @@ class AlphaZeroConfig:
         self.egg_prior_boost = 1.5
         # Shaping reward per egg differential added to value targets.
         self.shaping_reward_per_egg = 0.1
+        # Immediate value bonus for egg placements to speed up learning.
+        self.egg_immediate_value = 0.3
         # Number of initial training loops to force egg moves when legal during self-play.
         self.scripted_egg_loops = 10
-
-        # ========================
-        # Target Sharpening
-        # ========================
-        # Temperature applied to MCTS visit counts before normalizing as training targets (<1.0 = sharper).
-        self.training_target_temperature = 0.75

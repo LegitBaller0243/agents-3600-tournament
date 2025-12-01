@@ -20,7 +20,11 @@ def play_head_to_head(
     """
     # Force deterministic play during arena: no root noise, temperature = 0 (argmax).
     orig_sampling_moves = config.num_sampling_moves
+    orig_mid_start = config.midgame_temperature_start
+    orig_mid_span = config.midgame_temperature_span
     config.num_sampling_moves = 0
+    config.midgame_temperature_start = 0
+    config.midgame_temperature_span = 0
 
     game = Game()
     while not game.terminal() and len(game.history) < config.max_moves:
@@ -63,6 +67,8 @@ def play_head_to_head(
 
     # Restore sampling settings after deterministic arena play.
     config.num_sampling_moves = orig_sampling_moves
+    config.midgame_temperature_start = orig_mid_start
+    config.midgame_temperature_span = orig_mid_span
     return game
 
 

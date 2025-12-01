@@ -64,13 +64,13 @@ def alphazero(config: AlphaZeroConfig):
     avg_loss = train_network(config, storage, replay_buffer)
     print(f"  [Training] Average loss: {avg_loss:.4f}")
 
-  candidate_network = storage.latest_network()
-  if not config.save_networks:
-    candidate_network = copy.deepcopy(candidate_network)
-  # Early window: auto-promote without arena to accelerate egg behavior adoption.
-  if (training_iter + 1) <= config.early_promotion_loops:
-    best_network = candidate_network if config.save_networks else copy.deepcopy(candidate_network)
-    print(f"  [Eval] Early window auto-promotion (loop {training_iter + 1}/{config.early_promotion_loops})")
+    candidate_network = storage.latest_network()
+    if not config.save_networks:
+      candidate_network = copy.deepcopy(candidate_network)
+    # Early window: auto-promote without arena to accelerate egg behavior adoption.
+    if (training_iter + 1) <= config.early_promotion_loops:
+      best_network = candidate_network if config.save_networks else copy.deepcopy(candidate_network)
+      print(f"  [Eval] Early window auto-promotion (loop {training_iter + 1}/{config.early_promotion_loops})")
     # After early window: evaluate against previous best with gating.
     elif (training_iter + 1) % config.evaluation_interval == 0:
       win_rate = evaluate_against_best(config, best_network, candidate_network, run_mcts)
@@ -116,6 +116,7 @@ def play_game(config: AlphaZeroConfig, network: Network, force_egg: bool = False
   # Make shaping reward available to the environment if supported.
   if hasattr(game, "environment"):
     setattr(game.environment, "shaping_reward_per_egg", config.shaping_reward_per_egg)
+    setattr(game.environment, "egg_immediate_value", config.egg_immediate_value)
   while not game.terminal() and len(game.history) < config.max_moves:
     action, root = run_mcts(config, game, network)
     if force_egg:
@@ -157,7 +158,14 @@ def select_action(config: AlphaZeroConfig, game: Game, root: Node):
   visit_counts = [(child.visit_count, action)
                   for action, child in root.children.items()]
 
-  if len(game.history) < config.num_sampling_moves:
+  move_idx = len(game.history)
+  mid_start = config.midgame_temperature_start
+  mid_span = config.midgame_temperature_span
+  apply_temperature = (
+      move_idx < config.num_sampling_moves
+      or (mid_span > 0 and mid_start <= move_idx < (mid_start + mid_span))
+  )
+  if apply_temperature:
     _, action = softmax_sample(visit_counts)
   else:
     _, action = max(visit_counts)
@@ -236,7 +244,7 @@ def evaluate(node: Node, game: Game, network: Network | None = None, config: Alp
         egg_boost = config.egg_prior_boost if config is not None else 1.0
         p *= (3.0 * egg_boost)
       elif mv == MoveType.TURD:
-        p *= 1.5
+        p *= 1.0
       elif mv == MoveType.PLAIN:
         # If a plain move steps onto an egg-able square for the acting chicken, boost it.
         dest = loc_after_direction(acting_chicken.get_location(), Direction(direction))
@@ -318,12 +326,18 @@ def train_network(config: AlphaZeroConfig, storage: SharedStorage,
     batch = replay_buffer.sample_batch()
     if len(batch) > 0:
       loss, batch_top_eggs, batch_samples = update_weights(
-          optimizer, network, batch, config.weight_decay, device)
+          optimizer,
+          network,
+          batch,
+          config.weight_decay,
+          device,
+          config.policy_entropy_coef,
+      )
       total_loss += loss
       egg_top_visit += batch_top_eggs
       egg_sample_count += batch_samples
-  else:
-    break  # No data to train on
+    else:
+      break  # No data to train on
   
   # Save updated network
   if config.save_networks:
@@ -354,7 +368,8 @@ def get_learning_rate(step: int, schedule: dict):
 
 
 def update_weights(optimizer: optim.Optimizer, network: Network, batch,
-                   weight_decay: float, device: torch.device):
+                   weight_decay: float, device: torch.device,
+                   policy_entropy_coef: float):
   network.train()
   optimizer.zero_grad()
   
@@ -397,6 +412,7 @@ def update_weights(optimizer: optim.Optimizer, network: Network, batch,
   # Policy loss: target_policy is a distribution over actions
   # Use KL divergence between log_softmax(policy_logits) and target_policy
   log_probs = nn.functional.log_softmax(policy_logits, dim=1)
+  probs = nn.functional.softmax(policy_logits, dim=1)
   eps = 1e-8
   # Type-weighted policy loss: egg/turd errors are penalized more.
   with torch.no_grad():
@@ -408,7 +424,9 @@ def update_weights(optimizer: optim.Optimizer, network: Network, batch,
   kl_per_action = (target_policies_tensor + eps) * (torch.log(target_policies_tensor + eps) - log_probs)
   policy_loss = (weights * kl_per_action).sum() / weights.sum()
 
-  total_loss = value_loss + policy_loss
+  entropy = -(probs * log_probs).sum(dim=1).mean()
+  entropy_loss = -entropy  # maximize entropy
+  total_loss = value_loss + policy_loss + policy_entropy_coef * entropy_loss
   batch_top_visit = target_policies_tensor.argmax(dim=1)
   egg_top_visit = int((batch_top_visit % 3 == int(MoveType.EGG)).sum().item())
   sample_count = int(batch_top_visit.numel())
